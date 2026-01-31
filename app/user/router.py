@@ -1,40 +1,80 @@
 
+from fastapi import APIRouter, Depends, HTTPException, Response, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi import APIRouter, Depends, HTTPException, Response
-from app.database import async_session_maker
-from app.user.auth import create_access_token
-from app.user.dependencies import get_current_user
-from app.user.model import User
-from app.user.schema import SUser_login, SUser_profile, SUser_register
-from app.user.user_dao import User_dao
+from app.database import get_async_session
+
+from app.user.dependencies import get_current_user, get_user_service
+from app.user.schema import UserRegister, UserLogin, UserResponse, LoginResponse
+from app.user.service import UserService
 
 router = APIRouter(
-    prefix = "/user",
-    tags = ["user"]
+    prefix="/user",
+    tags=["user"]
 )
 
 
-@router.post("/register")
-async def register_user(get_user:SUser_register):
-    user = await User_dao.find_one_or_none(email = get_user.email)
-    if user:
-        raise HTTPException(500  , detail= "You are already registered")
-    await User_dao.add(
-        first_name = get_user.first_name,
-        last_name = get_user.last_name,
-        email = get_user.email,
-        hashed_password = get_user.hashed_password,
-    )
-@router.post("/login")
-async def login_user(response:Response , set_user:SUser_login):
-    user = await User_dao.find_one_or_none(email = set_user.email , hashed_password = set_user.hashed_password)
-    if not user:
-        raise HTTPException(500 , detail = "login or password is incorrect")
-    if user:
-        access_token = create_access_token({"sub":str(user.id)})
-        response.set_cookie("user_access_token" , access_token , httponly=True)
-        return access_token
-    
-@router.get("/profil", response_model= SUser_profile)
-async def user_profile(current_user = Depends(get_current_user)):
+@router.post("/register",response_model = UserResponse, status_code=status.HTTP_201_CREATED)
+async def register_user(
+    user_data: UserRegister,
+    session: AsyncSession = Depends(get_async_session),
+    user_service: UserService = Depends(get_user_service)
+):
+    """Регистрация нового пользователя"""
+    try:
+        user = await user_service.register_user(
+            session,
+            first_name=user_data.first_name,
+            last_name=user_data.last_name,
+            email=user_data.email,
+            password=user_data.password  # Теперь пароль будет захеширован в сервисе
+        )
+        return user
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500,detail = str(e))
+
+
+@router.post("/login", response_model=LoginResponse)
+async def login_user(
+    response: Response,
+    user_data: UserLogin,
+    session: AsyncSession = Depends(get_async_session),
+    user_service: UserService = Depends(get_user_service)
+):
+    """Авторизация пользователя"""
+    try:
+        access_token = await user_service.login_user(
+            session,
+            email=user_data.email,
+            password=user_data.password  # Теперь пароль будет захеширован в сервисе
+        )
+        
+        # Устанавливаем cookie с токеном
+        response.set_cookie(
+            "user_access_token", 
+            access_token, 
+            httponly=True,
+            secure=True,  # В продакшене должно быть True
+            samesite="lax"
+        )
+        
+        return LoginResponse(access_token=access_token)
+    except ValueError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Внутренняя ошибка сервера")
+
+
+@router.get("/profile", response_model=UserResponse)
+async def get_user_profile(current_user = Depends(get_current_user)):
+    """Получение профиля текущего пользователя"""
     return current_user
+
+
+@router.post("/logout")
+async def logout_user(response: Response):
+    """Выход пользователя из системы"""
+    response.delete_cookie("user_access_token")
+    return {"message": "Успешный выход из системы"}

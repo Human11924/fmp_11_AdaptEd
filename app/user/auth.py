@@ -1,10 +1,23 @@
 from jose import jwt
+from passlib.context import CryptContext
 from app.config import Settings
 
 settings = Settings()
-def create_access_token(data:dict) -> str:
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+def create_access_token(data: dict) -> str:
+    """Создает JWT токен доступа"""
     to_encode = data.copy()
     encoded_jwt = jwt.encode(
-        to_encode , settings.secret_key , algorithm=settings.algorithm
+        to_encode, settings.secret_key, algorithm=settings.algorithm
     )
     return encoded_jwt
+
+def hash_password(password: str) -> str:
+    """Хеширует пароль"""
+    return pwd_context.hash(password)
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    """Проверяет пароль против хешированной версии"""
+    return pwd_context.verify(plain_password, hashed_password)
+    

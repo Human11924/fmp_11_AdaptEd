@@ -1,8 +1,12 @@
 
 from sqlalchemy import Column, Integer, String
 from sqlalchemy.orm import relationship
+from typing import TYPE_CHECKING
 
 from app.database import Base
+
+if TYPE_CHECKING:
+    from app.quiz.model import Quiz
 
 
 class Course(Base):
